@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport"
+        content="width=device-width, initial-scale=1">
+  <title>愉快仲間員工打卡</title>
+
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+
+  <style>
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      padding: 24px;
+      background: #f3f6f5;
+      color: #20342c;
+      font-family: -apple-system, BlinkMacSystemFont,
+        "Segoe UI", sans-serif;
+    }
+
+    main {
+      max-width: 420px;
+      margin: 48px auto;
+      padding: 32px 24px;
+      background: white;
+      border-radius: 20px;
+      box-shadow: 0 8px 32px #00000008;
+      text-align: center;
+    }
+
+    h1 { font-size: 24px; }
+
+    #status {
+      line-height: 1.8;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    button {
+      width: 100%;
+      margin-top: 16px;
+      padding: 16px;
+      border: 0;
+      border-radius: 12px;
+      background: #06c755;
+      color: white;
+      font-size: 18px;
+      cursor: pointer;
+    }
+
+    button[hidden] { display: none; }
+
+    .note {
+      margin-top: 24px;
+      color: #75827c;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+  </style>
+</head>
+
+<body>
+  <main>
+    <h1>愉快仲間員工打卡</h1>
+    <p id="status" role="status">正在確認 LINE 身分……</p>
+    <button id="login" hidden>使用 LINE 登入</button>
+    <p class="note">
+      身分辨識測試版<br>
+      目前不會記錄出勤
+    </p>
+  </main>
+
+  <script>
+    const LIFF_ID = '2012178266-ti6J5alX';
+    const PAGE_URL =
+      'https://hiko-spec.github.io/yukai-attendance/';
+
+    const status = document.getElementById('status');
+    const login = document.getElementById('login');
+
+    login.addEventListener('click', function () {
+      liff.login({ redirectUri: PAGE_URL });
+    });
+
+    async function start() {
+      const timer = setTimeout(function () {
+        status.textContent =
+          '載入時間較長，請確認網路連線，' +
+          '以及 LINE Developers 的 Endpoint URL 已更新。';
+      }, 15000);
+
+      try {
+        if (typeof liff === 'undefined') {
+          throw new Error('LINE 元件載入失敗，請重新開啟。');
+        }
+
+        await liff.init({ liffId: LIFF_ID });
+
+        if (!liff.isLoggedIn()) {
+          status.textContent = '請點下方按鈕登入 LINE。';
+          login.hidden = false;
+          return;
+        }
+
+        const profile = await liff.getProfile();
+
+        status.textContent =
+          'LINE 身分讀取成功 ✅\n' +
+          '你好，' + profile.displayName + '！';
+
+      } catch (error) {
+        status.textContent =
+          '身分讀取尚未成功\n' +
+          (error.message || String(error));
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    start();
+  </script>
+</body>
+</html>
