@@ -1,368 +1,553 @@
 <!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport"
-        content="width=device-width, initial-scale=1">
-  <title>愉快仲間員工打卡</title>
-  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
-  <style>
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      padding: 20px;
-      background: #f3f6f5;
-      color: #20342c;
-      font-family: -apple-system, sans-serif;
-    }
-    main {
-      max-width: 440px;
-      margin: 24px auto;
-      padding: 28px 22px;
-      background: white;
-      border-radius: 20px;
-      text-align: center;
-    }
-    h1 { font-size: 24px; }
-    #status, #location {
-      white-space: pre-wrap;
-      overflow-wrap: anywhere;
-      line-height: 1.8;
-    }
-    #location {
-      color: #526760;
-      font-size: 14px;
-    }
-    .grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
-      margin-top: 24px;
-    }
-    button {
-      padding: 18px 10px;
-      border: 0;
-      border-radius: 12px;
-      background: #087f50;
-      color: white;
-      font-size: 18px;
-      cursor: pointer;
-    }
-    button:disabled {
-      opacity: .45;
-      cursor: default;
-    }
-    .secondary { background: #526760; }
-    .wide { width: 100%; margin-top: 16px; }
-    [hidden] { display: none !important; }
-    .note {
-      margin-top: 24px;
-      color: #75827c;
-      font-size: 13px;
-      line-height: 1.8;
-    }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>愉快仲間員工打卡</title>
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 18px;
+    background: #f3f6f5; color: #20342c;
+    font-family: -apple-system, sans-serif;
+  }
+  main {
+    max-width: 560px; margin: 20px auto;
+    padding: 26px 20px; background: white;
+    border-radius: 20px;
+  }
+  h1 { font-size: 24px; text-align: center; }
+  h2 { font-size: 21px; }
+  h3 { font-size: 17px; }
+  #name, #status, #location { text-align: center; }
+  .message { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.8; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  button {
+    padding: 16px 12px; border: 0; border-radius: 10px;
+    background: #087f50; color: white; font-size: 16px;
+    cursor: pointer;
+  }
+  button:disabled { opacity: .4; cursor: default; }
+  .secondary { background: #526760; }
+  .danger { background: #a63838; }
+  .wide { width: 100%; margin-top: 14px; }
+  .small { padding: 10px 14px; font-size: 14px; }
+  .card {
+    border: 1px solid #dce6e1; border-radius: 12px;
+    padding: 14px; margin: 12px 0;
+    overflow-wrap: anywhere;
+  }
+  .card p { margin: 6px 0; line-height: 1.6; }
+  .muted, .note { color: #65776e; font-size: 13px; line-height: 1.8; }
+  .note { text-align: center; margin-top: 24px; }
+  input, select {
+    width: 100%; padding: 12px; margin: 6px 0 14px;
+    border: 1px solid #bacdc2; border-radius: 8px;
+    font-size: 16px; background: white; color: #20342c;
+  }
+  label { display: block; }
+  hr { border: 0; border-top: 1px solid #dce6e1; margin: 24px 0; }
+  [hidden] { display: none !important; }
+</style>
 </head>
 <body>
-  <main>
-    <h1>愉快仲間員工打卡</h1>
-    <p id="name"></p>
-    <p id="status" role="status">正在確認帳號……</p>
-    <p id="location"></p>
+<main>
+  <h1>愉快仲間員工打卡</h1>
+  <p id="name"></p>
+  <p id="status" class="message" role="status">正在確認帳號……</p>
+  <p id="location" class="muted"></p>
 
-    <button id="login" class="wide" hidden>
-      使用 LINE 登入
-    </button>
-    <button id="check" class="wide secondary" hidden>
-      重新確認開通狀態
-    </button>
+  <button id="login" class="wide" hidden>使用 LINE 登入</button>
+  <button id="check" class="wide secondary" hidden>重新確認開通狀態</button>
 
-    <div id="buttons" class="grid" hidden>
-      <button data-type="上班">上班</button>
-      <button data-type="下班">下班</button>
-      <button data-type="休息開始" class="secondary">
-        休息開始
-      </button>
-      <button data-type="休息結束" class="secondary">
-        休息結束
-      </button>
+  <div id="punchButtons" class="grid" hidden>
+    <button data-type="上班">上班</button>
+    <button data-type="下班">下班</button>
+    <button data-type="休息開始" class="secondary">休息開始</button>
+    <button data-type="休息結束" class="secondary">休息結束</button>
+  </div>
+
+  <button id="retry" class="wide secondary" hidden>重試同一筆打卡</button>
+  <button id="adminToggle" class="wide secondary" hidden>管理後台</button>
+
+  <section id="adminPanel" hidden>
+    <hr>
+    <h2>管理後台</h2>
+    <p id="adminMessage" class="message" role="status"></p>
+
+    <div class="grid">
+      <button id="today" class="small">今日出勤</button>
+      <button id="members" class="small secondary">員工管理</button>
     </div>
 
-    <button id="retry" class="wide secondary" hidden>
-      重試同一筆打卡
-    </button>
+    <div id="todayList"></div>
 
-    <p class="note">
-      打卡地點：忠孝東路五段477之5號<br>
-      允許範圍：店舖周圍100公尺<br>
-      打卡時取得並記錄位置，不持續追蹤。<br>
-      時間以伺服器儲存時間為準。<br>
-      版本：定位打卡 1.1
-    </p>
-  </main>
+    <section id="employeeSection" hidden>
+      <h3>員工管理</h3>
+      <p class="muted">
+        啟用前請核對姓名與本人。停用不會刪除歷史紀錄。
+        姓名及管理員角色請由試算表修改。
+      </p>
+      <div id="employeeList"></div>
+    </section>
 
-  <script>
-    const LIFF_ID = '2012178266-ti6J5alX';
-    const PAGE_URL =
-      'https://hiko-spec.github.io/yukai-attendance/';
-    const API_URL =
-      'https://script.google.com/macros/s/AKfycbwdBsaKp56i3E_5DBSOSb9CO7eyJ2STOjlyO3g7j1lqa1v7skQoTkxAsHgpccfCd9ec/exec';
+    <hr>
+    <h3>打卡紀錄查詢</h3>
+    <label for="queryDate">日期</label>
+    <input id="queryDate" type="date">
 
-    const statusEl = document.getElementById('status');
-    const nameEl = document.getElementById('name');
-    const locationEl = document.getElementById('location');
-    const loginBtn = document.getElementById('login');
-    const checkBtn = document.getElementById('check');
-    const retryBtn = document.getElementById('retry');
-    const buttons = document.getElementById('buttons');
+    <label for="queryEmployee">員工</label>
+    <select id="queryEmployee">
+      <option value="">全部員工</option>
+    </select>
 
-    let busy = false;
-    let pending = null;
+    <button id="search" class="wide">查詢紀錄</button>
+    <div id="recordList"></div>
+  </section>
 
-    function updateButtons() {
-      document.querySelectorAll('button').forEach(function (b) {
-        b.disabled = busy;
-      });
-      buttons.querySelectorAll('button').forEach(function (b) {
-        b.disabled = busy || !!pending;
-      });
+  <p class="note">
+    打卡地點：忠孝東路五段477之5號<br>
+    允許範圍：店舖周圍100公尺<br>
+    只在打卡時取得位置，不持續追蹤。<br>
+    版本：定位打卡＋管理 1.2
+  </p>
+</main>
+
+<script>
+const LIFF_ID = '2012178266-ti6J5alX';
+const PAGE_URL = 'https://hiko-spec.github.io/yukai-attendance/';
+const API_URL =
+  'https://script.google.com/macros/s/AKfycbwdBsaKp56i3E_5DBSOSb9CO7eyJ2STOjlyO3g7j1lqa1v7skQoTkxAsHgpccfCd9ec/exec';
+
+const $ = id => document.getElementById(id);
+let busy = false;
+let pending = null;
+let account = null;
+
+function refreshButtons() {
+  document.querySelectorAll('button').forEach(b => {
+    b.disabled = busy || b.dataset.locked === 'true';
+  });
+  $('punchButtons').querySelectorAll('button').forEach(b => {
+    b.disabled = busy || !!pending;
+  });
+  $('adminToggle').disabled = busy || !!pending;
+  $('queryDate').disabled = busy;
+  $('queryEmployee').disabled = busy;
+}
+
+function setBusy(value) {
+  busy = value;
+  refreshButtons();
+}
+
+function clearAdmin() {
+  $('adminPanel').hidden = true;
+  $('adminToggle').hidden = true;
+  ['todayList', 'employeeList', 'recordList'].forEach(id => {
+    $(id).replaceChildren();
+  });
+  $('queryEmployee').replaceChildren(new Option('全部員工', ''));
+}
+
+async function api(payload) {
+  const idToken = liff.getIDToken();
+  if (!idToken) throw new Error('登入已失效，請關閉後重新開啟。');
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 45000);
+
+  try {
+    const response = await fetch(API_URL, {
+      method: 'POST',
+      credentials: 'omit',
+      headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+      body: JSON.stringify({ ...payload, idToken }),
+      signal: controller.signal
+    });
+
+    if (!response.ok) throw new Error('後端連線失敗：' + response.status);
+
+    let result;
+    try {
+      result = await response.json();
+    } catch (_) {
+      throw new Error('後端回應不正確，請確認部署設定。');
     }
 
-    function setBusy(value) {
-      busy = value;
-      updateButtons();
+    if (!result || typeof result.ok !== 'boolean') {
+      throw new Error('後端回應格式不正確。');
     }
 
-    function getLocation() {
-      return new Promise(function (resolve, reject) {
-        if (!navigator.geolocation) {
-          reject(new Error('此瀏覽器不支援定位，請使用手機 LINE。'));
-          return;
-        }
-
-        navigator.geolocation.getCurrentPosition(
-          function (position) {
-            resolve({
-              lat: position.coords.latitude,
-              lng: position.coords.longitude,
-              accuracy: position.coords.accuracy
-            });
-          },
-          function (error) {
-            const messages = {
-              1: '定位權限未開啟。請允許 LINE 與此網頁使用位置後再試。',
-              2: '目前無法取得位置，請移到店門口或窗邊再試。',
-              3: '定位逾時，請確認手機定位已開啟後再試。'
-            };
-            reject(new Error(
-              messages[error.code] || '定位失敗，請重新嘗試。'
-            ));
-          },
-          {
-            enableHighAccuracy: true,
-            timeout: 20000,
-            maximumAge: 0
-          }
-        );
-      });
+    if (result.enabled === false) {
+      $('punchButtons').hidden = true;
+      $('check').hidden = false;
+      account = null;
+      clearAdmin();
     }
 
-    async function api(payload) {
-      const idToken = liff.getIDToken();
-      if (!idToken) {
-        throw new Error('登入已失效，請關閉後重新開啟。');
-      }
+    return result;
+  } catch (error) {
+    if (error.name === 'AbortError') throw new Error('連線逾時。');
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
-      const controller = new AbortController();
-      const timer = setTimeout(function () {
-        controller.abort();
-      }, 45000);
+async function checkAccount() {
+  if (busy || pending) return;
+  setBusy(true);
+  clearAdmin();
+  $('status').textContent = '正在確認帳號……';
 
-      try {
-        const response = await fetch(API_URL, {
-          method: 'POST',
-          credentials: 'omit',
-          headers: {
-            'Content-Type': 'text/plain;charset=UTF-8'
-          },
-          body: JSON.stringify({
-            ...payload,
-            idToken: idToken
-          }),
-          signal: controller.signal
-        });
+  try {
+    const result = await api({ action: 'me' });
+    if (!result.ok) throw new Error(result.message);
 
-        if (!response.ok) {
-          throw new Error('後端連線失敗：' + response.status);
-        }
+    account = result;
+    $('name').textContent = result.name ? '你好，' + result.name : '';
+    $('status').textContent = result.message;
+    $('punchButtons').hidden = !result.enabled;
+    $('check').hidden = !!result.enabled;
+    $('adminToggle').hidden = !(result.enabled && result.isAdmin);
 
-        let result;
-        try {
-          result = await response.json();
-        } catch (_) {
-          throw new Error('後端回應不正確，請通知管理員確認部署。');
-        }
+    if (result.today) $('queryDate').value = result.today;
+  } catch (error) {
+    account = null;
+    $('status').textContent = error.message;
+    $('punchButtons').hidden = true;
+    $('check').hidden = false;
+  } finally {
+    setBusy(false);
+  }
+}
 
-        if (!result || typeof result.ok !== 'boolean') {
-          throw new Error('後端回應格式不正確。');
-        }
-        return result;
-      } catch (error) {
-        if (error.name === 'AbortError') {
-          throw new Error('連線逾時。');
-        }
-        throw error;
-      } finally {
-        clearTimeout(timer);
-      }
+function getLocation() {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) {
+      reject(new Error('此瀏覽器不支援定位。'));
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      p => resolve({
+        lat: p.coords.latitude,
+        lng: p.coords.longitude,
+        accuracy: p.coords.accuracy
+      }),
+      e => reject(new Error({
+        1: '定位權限未開啟，請允許 LINE 與網頁使用位置。',
+        2: '無法取得位置，請移至店門口或窗邊再試。',
+        3: '定位逾時，請重新嘗試。'
+      }[e.code] || '定位失敗。')),
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
+    );
+  });
+}
+
+async function beginPunch(type) {
+  if (busy || pending) return;
+  if (!confirm('確認進行「' + type + '」定位打卡？')) return;
+
+  setBusy(true);
+  $('status').textContent = '正在定位，請允許手機使用位置……';
+  $('location').textContent = '';
+  let ready = false;
+
+  try {
+    const location = await getLocation();
+    $('location').textContent =
+      '定位誤差約 ' + Math.round(location.accuracy) + ' 公尺';
+
+    if (location.accuracy > 100) {
+      throw new Error('定位誤差超過100公尺，請移至店門口或窗邊重試。');
     }
 
-    async function checkAccount() {
-      if (busy || pending) return;
-      setBusy(true);
-      statusEl.textContent = '正在確認員工開通狀態……';
+    pending = {
+      type,
+      requestId: crypto.randomUUID(),
+      location
+    };
+    ready = true;
+  } catch (error) {
+    $('status').textContent = error.message + '\n本次尚未送出打卡。';
+  } finally {
+    setBusy(false);
+  }
 
-      try {
-        const result = await api({ action: 'me' });
-        if (!result.ok) throw new Error(result.message);
+  if (ready) await sendPending();
+}
 
-        nameEl.textContent = result.name
-          ? '你好，' + result.name
-          : '';
-        statusEl.textContent = result.message;
-        buttons.hidden = !result.enabled;
-        checkBtn.hidden = !!result.enabled;
-      } catch (error) {
-        statusEl.textContent = error.message;
-        buttons.hidden = true;
-        checkBtn.hidden = false;
-      } finally {
-        setBusy(false);
-      }
+async function sendPending() {
+  if (busy || !pending) return;
+  setBusy(true);
+  $('retry').hidden = true;
+  $('status').textContent = '正在儲存「' + pending.type + '」……';
+
+  try {
+    const result = await api({ action: 'punch', ...pending });
+
+    if (!result.ok || !result.enabled) {
+      pending = null;
+      $('status').textContent = result.message;
+      return;
     }
 
-    async function sendPending() {
-      if (busy || !pending) return;
-      setBusy(true);
-      retryBtn.hidden = true;
-      statusEl.textContent =
-        '正在儲存「' + pending.type + '」……';
+    $('status').textContent = result.message + ' ✅\n' + result.time;
+    $('location').textContent =
+      '距離店舖約 ' + result.distance + ' 公尺';
+    pending = null;
+  } catch (error) {
+    $('status').textContent =
+      error.message +
+      '\n尚未確認是否已儲存，請留在此頁，重試同一筆打卡。';
+    $('retry').hidden = false;
+  } finally {
+    setBusy(false);
+  }
+}
 
-      try {
-        const result = await api({
-          action: 'punch',
-          type: pending.type,
-          requestId: pending.requestId,
-          location: pending.location
-        });
+// 使用文字節點顯示姓名及紀錄，避免把資料當成HTML執行。
+function addText(parent, tag, text, className) {
+  const node = document.createElement(tag);
+  node.textContent = text;
+  if (className) node.className = className;
+  parent.appendChild(node);
+  return node;
+}
 
-        if (!result.ok || !result.enabled) {
-          pending = null;
-          statusEl.textContent = result.message;
-          if (result.enabled === false) {
-            buttons.hidden = true;
-            checkBtn.hidden = false;
-          }
-          return;
-        }
+function card(parent) {
+  const node = document.createElement('div');
+  node.className = 'card';
+  parent.appendChild(node);
+  return node;
+}
 
-        statusEl.textContent =
-          result.message + ' ✅\n' + result.time;
-        locationEl.textContent =
-          '距離店舖約 ' + result.distance + ' 公尺';
-        pending = null;
-      } catch (error) {
-        statusEl.textContent =
-          error.message +
-          '\n尚未確認是否已儲存。' +
-          '\n請留在此頁，按「重試同一筆打卡」。';
-        retryBtn.hidden = false;
-      } finally {
-        setBusy(false);
-      }
+async function adminTask(task) {
+  if (busy || pending || !account?.isAdmin) return;
+  setBusy(true);
+  $('adminMessage').textContent = '讀取中……';
+
+  try {
+    await task();
+  } catch (error) {
+    $('adminMessage').textContent = error.message;
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function loadEmployees() {
+  const result = await api({ action: 'adminEmployees' });
+  if (!result.ok) throw new Error(result.message);
+  if (!Array.isArray(result.employees)) {
+    throw new Error('員工資料格式不正確。');
+  }
+
+  const selected = $('queryEmployee').value;
+  $('queryEmployee').replaceChildren(new Option('全部員工', ''));
+
+  result.employees.forEach(e => {
+    $('queryEmployee').add(new Option(e.name, e.userId));
+  });
+
+  if (result.employees.some(e => e.userId === selected)) {
+    $('queryEmployee').value = selected;
+  }
+
+  return result.employees;
+}
+
+async function readRecords(date, userId = '') {
+  const result = await api({
+    action: 'adminRecords',
+    date,
+    userId
+  });
+  if (!result.ok) throw new Error(result.message);
+  if (!Array.isArray(result.records)) {
+    throw new Error('出勤資料格式不正確。');
+  }
+  return result.records;
+}
+
+function taipeiToday() {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Taipei',
+    year: 'numeric', month: '2-digit', day: '2-digit'
+  }).formatToParts(new Date());
+
+  const get = type => parts.find(p => p.type === type).value;
+  return get('year') + '-' + get('month') + '-' + get('day');
+}
+
+async function showToday() {
+  $('todayList').replaceChildren();
+  const employees = await loadEmployees();
+  const date = taipeiToday();
+  const records = await readRecords(date);
+
+  addText($('todayList'), 'h3', date + ' 出勤');
+  addText(
+    $('todayList'), 'p',
+    '以下為當天最後一筆打卡；尚未打卡不代表缺勤，尚未比對班表。',
+    'muted'
+  );
+
+  const latest = new Map();
+  records.forEach(r => {
+    const old = latest.get(r.userId);
+    if (!old || r.timestamp >= old.timestamp) latest.set(r.userId, r);
+  });
+
+  const states = {
+    '上班': '已打上班卡',
+    '下班': '已打下班卡',
+    '休息開始': '已打休息開始',
+    '休息結束': '已打休息結束'
+  };
+
+  employees.forEach(e => {
+    const r = latest.get(e.userId);
+    const box = card($('todayList'));
+    addText(box, 'strong', e.name);
+    addText(
+      box, 'p',
+      r ? (states[r.type] || r.type) + '｜' + r.time : '當天尚無打卡紀錄'
+    );
+    addText(box, 'p', '帳號：' + e.status, 'muted');
+  });
+
+  $('adminMessage').textContent = '今日資料已更新。';
+}
+
+async function showEmployees() {
+  $('employeeSection').hidden = false;
+  $('employeeList').replaceChildren();
+  const employees = await loadEmployees();
+
+  employees.forEach(e => {
+    const box = card($('employeeList'));
+    addText(box, 'strong', e.name);
+    addText(box, 'p', '狀態：' + e.status + '｜角色：' + e.role);
+    addText(box, 'p', '帳號末6碼：' + e.userId.slice(-6), 'muted');
+
+    if (e.userId === account.userId || e.role.trim() === '管理員') {
+      addText(box, 'p', '管理員帳號由試算表管理。', 'muted');
+      return;
     }
 
-    async function beginPunch(type) {
-      if (busy || pending) return;
-      if (!window.confirm('確認進行「' + type + '」定位打卡？')) {
+    const nextStatus = e.status.trim() === '啟用' ? '停用' : '啟用';
+    const button = addText(box, 'button', nextStatus);
+    button.className =
+      'small' + (nextStatus === '停用' ? ' danger' : '');
+
+    button.addEventListener('click', () => {
+      if (busy) return;
+      if (!confirm('確認將「' + e.name + '」設為「' + nextStatus + '」？')) {
         return;
       }
 
-      setBusy(true);
-      statusEl.textContent = '正在定位，請允許手機使用位置……';
-      locationEl.textContent = '';
-      let ready = false;
+      adminTask(async () => {
+        const result = await api({
+          action: 'adminSetStatus',
+          userId: e.userId,
+          status: nextStatus
+        });
+        if (!result.ok) throw new Error(result.message);
 
-      try {
-        const location = await getLocation();
-
-        locationEl.textContent =
-          '手機回報定位誤差約 ' +
-          Math.round(location.accuracy) + ' 公尺';
-
-        if (location.accuracy > 100) {
-          throw new Error(
-            '定位誤差超過100公尺，尚未送出打卡。' +
-            '\n請移至店門口或窗邊後重新按打卡。'
-          );
-        }
-
-        pending = {
-          type: type,
-          requestId: crypto.randomUUID(),
-          location: location
-        };
-        ready = true;
-      } catch (error) {
-        statusEl.textContent =
-          error.message + '\n本次尚未送出打卡。';
-      } finally {
-        setBusy(false);
-      }
-
-      if (ready) await sendPending();
-    }
-
-    buttons.querySelectorAll('button').forEach(function (b) {
-      b.addEventListener('click', function () {
-        beginPunch(b.dataset.type);
+        const message = result.message;
+        await showEmployees();
+        $('todayList').replaceChildren();
+        $('adminMessage').textContent = message;
       });
     });
+  });
 
-    retryBtn.addEventListener('click', sendPending);
-    checkBtn.addEventListener('click', checkAccount);
-    loginBtn.addEventListener('click', function () {
-      liff.login({ redirectUri: PAGE_URL });
-    });
+  $('adminMessage').textContent = '員工名單已更新。';
+}
 
-    async function start() {
-      const timer = setTimeout(function () {
-        statusEl.textContent =
-          '載入時間較長，請確認網路連線；若持續停在此處，請截圖給管理員。';
-      }, 20000);
+async function searchRecords() {
+  const date = $('queryDate').value;
+  const userId = $('queryEmployee').value;
+  if (!date) throw new Error('請先選擇日期。');
 
-      try {
-        if (typeof liff === 'undefined') {
-          throw new Error('LINE 元件載入失敗，請重新開啟。');
-        }
-        await liff.init({ liffId: LIFF_ID });
-        clearTimeout(timer);
+  $('recordList').replaceChildren();
+  const records = await readRecords(date, userId);
 
-        if (!liff.isLoggedIn()) {
-          statusEl.textContent = '請先登入 LINE。';
-          loginBtn.hidden = false;
-          return;
-        }
+  if (!records.length) {
+    addText($('recordList'), 'p', '這個查詢條件沒有打卡紀錄。');
+  }
 
-        await checkAccount();
-      } catch (error) {
-        statusEl.textContent = error.message;
-      } finally {
-        clearTimeout(timer);
-      }
+  records.forEach(r => {
+    const box = card($('recordList'));
+    addText(box, 'strong', r.name + '｜' + r.type);
+    addText(box, 'p', r.time);
+    addText(
+      box, 'p',
+      r.distance == null
+        ? '此筆沒有定位資料'
+        : '距離店舖約 ' + r.distance + ' 公尺',
+      'muted'
+    );
+  });
+
+  $('adminMessage').textContent = '查到 ' + records.length + ' 筆紀錄。';
+}
+
+$('punchButtons').querySelectorAll('button').forEach(b => {
+  b.addEventListener('click', () => beginPunch(b.dataset.type));
+});
+
+$('retry').addEventListener('click', sendPending);
+$('check').addEventListener('click', checkAccount);
+$('login').addEventListener('click', () => {
+  liff.login({ redirectUri: PAGE_URL });
+});
+
+$('adminToggle').addEventListener('click', () => {
+  if (busy || pending || !account?.isAdmin) return;
+
+  $('adminPanel').hidden = !$('adminPanel').hidden;
+  $('adminToggle').textContent =
+    $('adminPanel').hidden ? '管理後台' : '收起管理後台';
+
+  if (!$('adminPanel').hidden) adminTask(showToday);
+});
+
+$('today').addEventListener('click', () => adminTask(showToday));
+$('members').addEventListener('click', () => adminTask(showEmployees));
+$('search').addEventListener('click', () => adminTask(searchRecords));
+
+async function start() {
+  const timer = setTimeout(() => {
+    $('status').textContent = '載入時間較長，請確認網路連線。';
+  }, 20000);
+
+  try {
+    if (typeof liff === 'undefined') {
+      throw new Error('LINE 元件載入失敗，請重新開啟。');
     }
 
-    start();
-  </script>
+    await liff.init({ liffId: LIFF_ID });
+    clearTimeout(timer);
+
+    if (!liff.isLoggedIn()) {
+      $('status').textContent = '請先登入 LINE。';
+      $('login').hidden = false;
+      return;
+    }
+
+    await checkAccount();
+  } catch (error) {
+    $('status').textContent = error.message;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+start();
+</script>
 </body>
 </html>
