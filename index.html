@@ -24,10 +24,14 @@
       text-align: center;
     }
     h1 { font-size: 24px; }
-    #status {
+    #status, #location {
       white-space: pre-wrap;
       overflow-wrap: anywhere;
       line-height: 1.8;
+    }
+    #location {
+      color: #526760;
+      font-size: 14px;
     }
     .grid {
       display: grid;
@@ -49,16 +53,13 @@
       cursor: default;
     }
     .secondary { background: #526760; }
-    .wide {
-      width: 100%;
-      margin-top: 16px;
-    }
+    .wide { width: 100%; margin-top: 16px; }
     [hidden] { display: none !important; }
     .note {
       margin-top: 24px;
       color: #75827c;
       font-size: 13px;
-      line-height: 1.7;
+      line-height: 1.8;
     }
   </style>
 </head>
@@ -67,11 +68,11 @@
     <h1>愉快仲間員工打卡</h1>
     <p id="name"></p>
     <p id="status" role="status">正在確認帳號……</p>
+    <p id="location"></p>
 
     <button id="login" class="wide" hidden>
       使用 LINE 登入
     </button>
-
     <button id="check" class="wide secondary" hidden>
       重新確認開通狀態
     </button>
@@ -92,9 +93,11 @@
     </button>
 
     <p class="note">
-      打卡時間以伺服器收到並儲存的時間為準。<br>
-      目前尚未啟用定位檢查。<br>
-      版本：出勤測試 1.0
+      打卡地點：忠孝東路五段477之5號<br>
+      允許範圍：店舖周圍100公尺<br>
+      打卡時取得並記錄位置，不持續追蹤。<br>
+      時間以伺服器儲存時間為準。<br>
+      版本：定位打卡 1.1
     </p>
   </main>
 
@@ -107,6 +110,7 @@
 
     const statusEl = document.getElementById('status');
     const nameEl = document.getElementById('name');
+    const locationEl = document.getElementById('location');
     const loginBtn = document.getElementById('login');
     const checkBtn = document.getElementById('check');
     const retryBtn = document.getElementById('retry');
@@ -115,16 +119,56 @@
     let busy = false;
     let pending = null;
 
+    function updateButtons() {
+      document.querySelectorAll('button').forEach(function (b) {
+        b.disabled = busy;
+      });
+      buttons.querySelectorAll('button').forEach(function (b) {
+        b.disabled = busy || !!pending;
+      });
+    }
+
     function setBusy(value) {
       busy = value;
-      document.querySelectorAll('button').forEach(function (b) {
-        b.disabled = value;
+      updateButtons();
+    }
+
+    function getLocation() {
+      return new Promise(function (resolve, reject) {
+        if (!navigator.geolocation) {
+          reject(new Error('此瀏覽器不支援定位，請使用手機 LINE。'));
+          return;
+        }
+
+        navigator.geolocation.getCurrentPosition(
+          function (position) {
+            resolve({
+              lat: position.coords.latitude,
+              lng: position.coords.longitude,
+              accuracy: position.coords.accuracy
+            });
+          },
+          function (error) {
+            const messages = {
+              1: '定位權限未開啟。請允許 LINE 與此網頁使用位置後再試。',
+              2: '目前無法取得位置，請移到店門口或窗邊再試。',
+              3: '定位逾時，請確認手機定位已開啟後再試。'
+            };
+            reject(new Error(
+              messages[error.code] || '定位失敗，請重新嘗試。'
+            ));
+          },
+          {
+            enableHighAccuracy: true,
+            timeout: 20000,
+            maximumAge: 0
+          }
+        );
       });
     }
 
     async function api(payload) {
       const idToken = liff.getIDToken();
-
       if (!idToken) {
         throw new Error('登入已失效，請關閉後重新開啟。');
       }
@@ -156,13 +200,13 @@
         try {
           result = await response.json();
         } catch (_) {
-          throw new Error(
-            '後端未回傳預期資料，請確認部署與授權設定。'
-          );
+          throw new Error('後端回應不正確，請通知管理員確認部署。');
         }
 
+        if (!result || typeof result.ok !== 'boolean') {
+          throw new Error('後端回應格式不正確。');
+        }
         return result;
-
       } catch (error) {
         if (error.name === 'AbortError') {
           throw new Error('連線逾時。');
@@ -174,25 +218,20 @@
     }
 
     async function checkAccount() {
-      if (busy) return;
+      if (busy || pending) return;
       setBusy(true);
       statusEl.textContent = '正在確認員工開通狀態……';
 
       try {
         const result = await api({ action: 'me' });
-
-        if (!result.ok) {
-          throw new Error(result.message);
-        }
+        if (!result.ok) throw new Error(result.message);
 
         nameEl.textContent = result.name
           ? '你好，' + result.name
           : '';
-
         statusEl.textContent = result.message;
         buttons.hidden = !result.enabled;
         checkBtn.hidden = !!result.enabled;
-
       } catch (error) {
         statusEl.textContent = error.message;
         buttons.hidden = true;
@@ -202,7 +241,7 @@
       }
     }
 
-    async function sendPunch() {
+    async function sendPending() {
       if (busy || !pending) return;
       setBusy(true);
       retryBtn.hidden = true;
@@ -213,13 +252,13 @@
         const result = await api({
           action: 'punch',
           type: pending.type,
-          requestId: pending.requestId
+          requestId: pending.requestId,
+          location: pending.location
         });
 
         if (!result.ok || !result.enabled) {
           pending = null;
           statusEl.textContent = result.message;
-
           if (result.enabled === false) {
             buttons.hidden = true;
             checkBtn.hidden = false;
@@ -229,53 +268,85 @@
 
         statusEl.textContent =
           result.message + ' ✅\n' + result.time;
+        locationEl.textContent =
+          '距離店舖約 ' + result.distance + ' 公尺';
         pending = null;
-
       } catch (error) {
         statusEl.textContent =
           error.message +
-          '\n尚未確認是否儲存成功。' +
-          '\n請按「重試同一筆打卡」，避免重複新增。';
+          '\n尚未確認是否已儲存。' +
+          '\n請留在此頁，按「重試同一筆打卡」。';
         retryBtn.hidden = false;
       } finally {
         setBusy(false);
-        buttons.querySelectorAll('button').forEach(function (b) {
-          b.disabled = !!pending;
-        });
       }
     }
 
-    buttons.querySelectorAll('button').forEach(function (b) {
-      b.addEventListener('click', function () {
-        if (busy || pending) return;
+    async function beginPunch(type) {
+      if (busy || pending) return;
+      if (!window.confirm('確認進行「' + type + '」定位打卡？')) {
+        return;
+      }
 
-        const type = b.dataset.type;
-        if (!window.confirm('確認進行「' + type + '」打卡？')) {
-          return;
+      setBusy(true);
+      statusEl.textContent = '正在定位，請允許手機使用位置……';
+      locationEl.textContent = '';
+      let ready = false;
+
+      try {
+        const location = await getLocation();
+
+        locationEl.textContent =
+          '手機回報定位誤差約 ' +
+          Math.round(location.accuracy) + ' 公尺';
+
+        if (location.accuracy > 100) {
+          throw new Error(
+            '定位誤差超過100公尺，尚未送出打卡。' +
+            '\n請移至店門口或窗邊後重新按打卡。'
+          );
         }
 
         pending = {
           type: type,
-          requestId: crypto.randomUUID()
+          requestId: crypto.randomUUID(),
+          location: location
         };
-        sendPunch();
+        ready = true;
+      } catch (error) {
+        statusEl.textContent =
+          error.message + '\n本次尚未送出打卡。';
+      } finally {
+        setBusy(false);
+      }
+
+      if (ready) await sendPending();
+    }
+
+    buttons.querySelectorAll('button').forEach(function (b) {
+      b.addEventListener('click', function () {
+        beginPunch(b.dataset.type);
       });
     });
 
+    retryBtn.addEventListener('click', sendPending);
     checkBtn.addEventListener('click', checkAccount);
-    retryBtn.addEventListener('click', sendPunch);
-
     loginBtn.addEventListener('click', function () {
       liff.login({ redirectUri: PAGE_URL });
     });
 
     async function start() {
+      const timer = setTimeout(function () {
+        statusEl.textContent =
+          '載入時間較長，請確認網路連線；若持續停在此處，請截圖給管理員。';
+      }, 20000);
+
       try {
         if (typeof liff === 'undefined') {
           throw new Error('LINE 元件載入失敗，請重新開啟。');
         }
-
         await liff.init({ liffId: LIFF_ID });
+        clearTimeout(timer);
 
         if (!liff.isLoggedIn()) {
           statusEl.textContent = '請先登入 LINE。';
@@ -284,9 +355,10 @@
         }
 
         await checkAccount();
-
       } catch (error) {
         statusEl.textContent = error.message;
+      } finally {
+        clearTimeout(timer);
       }
     }
 
