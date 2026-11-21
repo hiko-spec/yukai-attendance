@@ -93,6 +93,25 @@
     <hr><h2>我的補打卡申請</h2>
     <div id="myCorrectionList"></div>
   </section>
+  <div id="overtimeButtons" class="grid" hidden style="margin-top:14px">
+    <button id="overtimeToggle" class="secondary">加班申請</button>
+    <button id="myOvertimes" class="secondary">我的加班申請</button>
+  </div>
+  <section id="overtimePanel" hidden>
+    <hr><h2>加班申請</h2>
+    <p class="muted">以台灣時間填寫，可事前申請或事後補申請。一份申請可填1～8段，整份時段須在24小時內。分段間的空檔不計入時數；每段休息分鐘只填該段內的休息時間。</p>
+    <p class="muted">加班類型由申請人選填，尚未比對班表。核准後仍需記錄實際出勤，本版不計算加班費。</p>
+    <label for="overtimeKind">加班類型</label>
+    <select id="overtimeKind"><option>當日延長工作</option><option>排休日工作</option></select>
+    <div id="overtimeRows"></div>
+    <button id="addOvertimeRow" class="wide secondary">新增一個時段</button>
+    <p id="overtimeTotal" class="message" role="status"></p>
+    <label for="overtimeReason">申請原因（最多500字）</label>
+    <textarea id="overtimeReason" maxlength="500" placeholder="例如：依預約安排於排休日到店接客。"></textarea>
+    <button id="submitOvertime" class="wide">送出加班申請</button>
+  </section>
+  <p id="overtimeMessage" class="message" role="status"></p>
+  <section id="myOvertimePanel" hidden><hr><h2>我的加班申請</h2><div id="myOvertimeList"></div></section>
   <button id="adminToggle" class="wide secondary" hidden>管理後台</button>
 
   <section id="adminPanel" hidden>
@@ -110,6 +129,12 @@
       <h3>補打卡審核</h3>
       <p class="muted">核准會新增「補登」紀錄，原始紀錄保留。自己的申請須由另一位管理員審核。這裡不會計算加班或薪資。</p>
       <div id="reviewList"></div>
+    </section>
+    <button id="reviewOvertimes" class="wide secondary">加班審核</button>
+    <section id="overtimeReviewSection" hidden>
+      <h3>加班審核</h3>
+      <p class="muted">請核對工作安排與時段。核准的是申請時段及扣除休息後的申請分鐘，不代表已核對實際出勤或完成薪資計算。自己的申請須由另一位管理員審核。</p>
+      <div id="overtimeReviewList"></div>
     </section>
     <div id="todayList"></div>
 
@@ -140,7 +165,7 @@
     打卡地點：忠孝東路五段477之5號<br>
     允許範圍：店舖周圍100公尺<br>
     只在打卡時取得位置，不持續追蹤。<br>
-    版本：定位打卡＋管理＋補打卡 1.3
+    版本：定位打卡＋補打卡＋加班 1.4
   </p>
 </main>
 
@@ -164,7 +189,8 @@ function refreshButtons() {
     b.disabled = busy || !!pending || !!pendingMutation;
   });
   $('adminToggle').disabled = busy || !!pending || !!pendingMutation;
-  ['correctionToggle', 'myCorrections', 'submitCorrection'].forEach(id => {
+  ['correctionToggle', 'myCorrections', 'submitCorrection',
+    'overtimeToggle', 'myOvertimes', 'submitOvertime', 'addOvertimeRow'].forEach(id => {
     $(id).disabled = busy || !!pending || !!pendingMutation;
   });
   document.querySelectorAll('input, select, textarea').forEach(field => {
@@ -180,8 +206,9 @@ function setBusy(value) {
 function clearAdmin() {
   $('adminPanel').hidden = true;
   $('reviewSection').hidden = true;
+  $('overtimeReviewSection').hidden = true;
   $('adminToggle').hidden = true;
-  ['todayList', 'employeeList', 'recordList', 'reviewList'].forEach(id => {
+  ['todayList', 'employeeList', 'recordList', 'reviewList', 'overtimeReviewList'].forEach(id => {
     $(id).replaceChildren();
   });
   $('queryEmployee').replaceChildren(new Option('全部員工', ''));
@@ -252,6 +279,7 @@ async function checkAccount() {
     $('adminToggle').hidden = !(result.enabled && result.isAdmin);
 
     $('correctionButtons').hidden = !(result.enabled && result.correctionEnabled);
+    $('overtimeButtons').hidden = !(result.enabled && result.overtimeEnabled);
     if (result.today) $('queryDate').value = result.today;
   } catch (error) {
     account = null;
@@ -566,6 +594,7 @@ $('search').addEventListener('click', () => adminTask(searchRecords));
 
 // 補打卡送出與審核使用固定內容重試，避免網路逾時後重複申請。
 function clearCorrections() {
+  clearOvertimes();
   $('correctionButtons').hidden = true;
   $('correctionPanel').hidden = true;
   $('myCorrectionPanel').hidden = true;
@@ -730,8 +759,263 @@ $('correctionToggle').addEventListener('click', () => {
 });
 $('myCorrections').addEventListener('click', () => correctionTask(showMyCorrections));
 $('submitCorrection').addEventListener('click', beginCorrection);
-$('retryMutation').addEventListener('click', sendCorrectionMutation);
+$('retryMutation').addEventListener('click', () => {
+  if (['submitOvertime', 'adminReviewOvertime'].includes(pendingMutation?.action)) sendOvertimeMutation();
+  else sendCorrectionMutation();
+});
 $('reviewCorrections').addEventListener('click', () => adminTask(showReviewCorrections));
+
+
+// 加班申請：沿用固定編號與原始內容重試；不自動新增打卡。
+function clearOvertimes() {
+  $('overtimeButtons').hidden = true;
+  $('overtimePanel').hidden = true;
+  $('myOvertimePanel').hidden = true;
+  $('myOvertimeList').replaceChildren();
+  $('overtimeRows').replaceChildren();
+  $('overtimeReason').value = '';
+  $('overtimeMessage').textContent = '';
+  $('overtimeTotal').textContent = '';
+}
+
+function addOvertimeRow() {
+  if (busy || pending || pendingMutation) return;
+  const container = $('overtimeRows');
+  if (container.children.length >= 8) {
+    $('overtimeMessage').textContent = '每份申請最多8個時段。';
+    return;
+  }
+  const box = card(container);
+  box.dataset.segment = 'true';
+  [['start', '開始日期與時間', 'datetime-local'],
+   ['end', '結束日期與時間', 'datetime-local'],
+   ['breakMinutes', '此時段內休息分鐘', 'number']].forEach(([key, title, type]) => {
+    const label = addText(box, 'label', title);
+    const input = document.createElement('input');
+    input.type = type;
+    input.dataset.field = key;
+    input.required = true;
+    if (key === 'breakMinutes') {
+      input.min = '0'; input.step = '1'; input.value = '0';
+    }
+    input.addEventListener('input', updateOvertimeTotal);
+    label.appendChild(input);
+  });
+  const remove = addText(box, 'button', '移除此時段', 'small secondary');
+  remove.type = 'button';
+  remove.addEventListener('click', () => {
+    if (busy || pending || pendingMutation) return;
+    if (container.children.length <= 1) {
+      $('overtimeMessage').textContent = '至少保留一個時段。';
+      return;
+    }
+    box.remove();
+    updateOvertimeTotal();
+  });
+  updateOvertimeTotal();
+}
+
+function overtimeTime(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)) {
+    throw new Error('請填寫每個時段的完整開始與結束日期時間。');
+  }
+  const ms = new Date(value + ':00+08:00').getTime();
+  if (!Number.isFinite(ms) || new Date(ms + 8 * 3600000).toISOString().slice(0, 16) !== value) {
+    throw new Error('加班日期或時間不正確。');
+  }
+  return ms;
+}
+
+function readOvertimeForm() {
+  const boxes = Array.from($('overtimeRows').children);
+  if (!boxes.length || boxes.length > 8) throw new Error('請填寫1至8個時段。');
+  const list = boxes.map(box => {
+    const fields = {};
+    box.querySelectorAll('input').forEach(input => { fields[input.dataset.field] = input.value; });
+    const startMs = overtimeTime(fields.start);
+    const endMs = overtimeTime(fields.end);
+    const duration = (endMs - startMs) / 60000;
+    const breakMinutes = fields.breakMinutes.trim() === '' ? NaN : Number(fields.breakMinutes);
+    if (duration <= 0) throw new Error('結束時間必須晚於開始時間。');
+    if (!Number.isInteger(breakMinutes) || breakMinutes < 0 || breakMinutes >= duration) {
+      throw new Error('休息分鐘須為非負整數，且小於該時段總分鐘。');
+    }
+    return {start: fields.start, end: fields.end, breakMinutes, startMs, endMs, minutes: duration - breakMinutes};
+  }).sort((a, b) => a.startMs - b.startMs);
+  if (list.at(-1).endMs - list[0].startMs > 86400000) {
+    throw new Error('一份申請的全部時段須在24小時內，跨多天請分次申請。');
+  }
+  for (let i = 1; i < list.length; i++) {
+    if (list[i].startMs < list[i - 1].endMs) throw new Error('各時段不能重疊。');
+  }
+  return {
+    segments: list.map(({start, end, breakMinutes}) => ({start, end, breakMinutes})),
+    minutes: list.reduce((sum, v) => sum + v.minutes, 0),
+    summary: list.map(v => v.start.replace('T', ' ') + ' ～ ' + v.end.replace('T', ' ') +
+      '（休息' + v.breakMinutes + '分鐘）').join('\n')
+  };
+}
+
+function minuteLabel(minutes) {
+  return Math.floor(minutes / 60) + ' 小時 ' + (minutes % 60) + ' 分鐘';
+}
+
+function updateOvertimeTotal() {
+  try {
+    const value = readOvertimeForm();
+    $('overtimeTotal').textContent = '申請時數：' + minuteLabel(value.minutes) + '（已扣除各時段內休息）';
+  } catch (error) {
+    $('overtimeTotal').textContent = error.message;
+  }
+}
+
+function overtimeCard(parent, r) {
+  const box = card(parent);
+  addText(box, 'strong', r.name + '｜' + r.kind);
+  addText(box, 'p', '加班時段：' + r.summary, 'message');
+  addText(box, 'p', '申請時數：' + minuteLabel(r.minutes));
+  addText(box, 'p', '各時段內休息合計：' + r.breakMinutes + ' 分鐘', 'muted');
+  addText(box, 'p', '原因：' + r.reason, 'message');
+  addText(box, 'p', '狀態：' + r.status);
+  addText(box, 'p', '申請時間：' + r.submittedAt, 'muted');
+  if (r.reviewerName) addText(box, 'p', '審核人：' + r.reviewerName, 'muted');
+  if (r.reviewedAt) addText(box, 'p', '審核時間：' + r.reviewedAt, 'muted');
+  if (r.reviewNote) addText(box, 'p', '審核備註：' + r.reviewNote, 'message');
+  return box;
+}
+
+async function showMyOvertimes() {
+  const result = await api({action: 'myOvertimes'});
+  if (!result.ok) throw new Error(result.message);
+  if (!Array.isArray(result.overtimes)) throw new Error('加班申請資料格式不正確。');
+  $('myOvertimePanel').hidden = false;
+  $('myOvertimeList').replaceChildren();
+  if (!result.overtimes.length) addText($('myOvertimeList'), 'p', '目前沒有加班申請。');
+  result.overtimes.forEach(r => overtimeCard($('myOvertimeList'), r));
+  if (result.truncated) addText($('myOvertimeList'), 'p', '顯示最近200筆；較舊紀錄仍保留於試算表。', 'muted');
+}
+
+async function overtimeTask(task) {
+  if (busy || pending || pendingMutation || !account?.enabled) return;
+  setBusy(true);
+  $('overtimeMessage').textContent = '讀取中……';
+  try {
+    await task();
+    $('overtimeMessage').textContent = '加班申請列表已更新。';
+  } catch (error) {
+    $('overtimeMessage').textContent = error.message;
+  } finally { setBusy(false); }
+}
+
+async function beginOvertime() {
+  if (busy || pending || pendingMutation || !account?.enabled || !account.overtimeEnabled) return;
+  try {
+    const value = readOvertimeForm();
+    const reason = $('overtimeReason').value.trim();
+    const kind = $('overtimeKind').value;
+    if (!reason || reason.length > 500) throw new Error('請填寫500字以內的申請原因。');
+    if (!['當日延長工作', '排休日工作'].includes(kind)) throw new Error('請選擇加班類型。');
+    if (!confirm('確認送出加班申請？\n' + kind + '\n' + value.summary + '\n申請時數：' +
+      minuteLabel(value.minutes) + '\n原因：' + reason)) return;
+    pendingMutation = {action: 'submitOvertime', requestId: crypto.randomUUID(),
+      kind, segments: value.segments, reason};
+    await sendOvertimeMutation();
+  } catch (error) {
+    $('overtimeMessage').textContent = error.message;
+  }
+}
+
+async function sendOvertimeMutation() {
+  if (busy || !pendingMutation || !account?.enabled) return;
+  const payload = pendingMutation;
+  setBusy(true);
+  $('retryMutation').hidden = true;
+  $('overtimeMessage').textContent = '正在送出加班申請或審核，請稍候……';
+  let result;
+  try { result = await api(payload); }
+  catch (error) {
+    const message = error.message + '\n尚未確認是否完成。請留在此頁，按「重試同一筆申請或審核」，不要另外送出。';
+    $('overtimeMessage').textContent = message;
+    $('correctionMessage').textContent = message;
+    if (payload.action === 'adminReviewOvertime') $('adminMessage').textContent = message;
+    $('retryMutation').hidden = false;
+    setBusy(false);
+    return;
+  }
+  pendingMutation = null;
+  const message = result.message || (result.ok ? '已完成。' : '處理失敗。');
+  $('overtimeMessage').textContent = message;
+  $('correctionMessage').textContent = '';
+  if (payload.action === 'adminReviewOvertime') $('adminMessage').textContent = message;
+  if (result.ok && payload.action === 'submitOvertime') {
+    $('overtimePanel').hidden = true;
+    $('overtimeReason').value = '';
+    $('overtimeRows').replaceChildren();
+    $('overtimeTotal').textContent = '';
+  }
+  try {
+    if (account?.enabled) {
+      if (payload.action === 'submitOvertime') await showMyOvertimes();
+      else if (account.isAdmin) {
+        await showReviewOvertimes();
+        $('adminMessage').textContent = message;
+      }
+    }
+  } catch (error) {
+    $('overtimeMessage').textContent = message + '\n列表更新失敗：' + error.message + '，請稍後重新查詢。';
+  } finally { setBusy(false); }
+}
+
+async function showReviewOvertimes() {
+  const result = await api({action: 'adminOvertimes'});
+  if (!result.ok) throw new Error(result.message);
+  if (!Array.isArray(result.overtimes)) throw new Error('加班審核資料格式不正確。');
+  $('overtimeReviewSection').hidden = false;
+  $('overtimeReviewList').replaceChildren();
+  addText($('overtimeReviewList'), 'p', '本頁待處理：' +
+    result.overtimes.filter(r => r.status === '待審核').length + ' 筆');
+  if (!result.overtimes.length) addText($('overtimeReviewList'), 'p', '目前沒有加班申請。');
+  if (result.truncated) addText($('overtimeReviewList'), 'p', '顯示最多200筆，待審核優先；較舊紀錄仍保留於試算表。', 'muted');
+  result.overtimes.forEach(r => {
+    const box = overtimeCard($('overtimeReviewList'), r);
+    if (r.status !== '待審核') return;
+    if (r.userId === account.userId) {
+      addText(box, 'p', '自己的申請須由另一位管理員審核。', 'muted');
+      return;
+    }
+    const label = addText(box, 'label', '審核備註（退回時必填）');
+    const note = document.createElement('textarea'); note.maxLength = 500;
+    label.appendChild(note);
+    const grid = document.createElement('div'); grid.className = 'grid'; box.appendChild(grid);
+    ['approve', 'reject'].forEach(decision => {
+      const button = addText(grid, 'button', decision === 'approve' ? '核准加班' : '退回申請');
+      if (decision === 'reject') button.className = 'danger';
+      button.addEventListener('click', async () => {
+        if (busy || pending || pendingMutation || !account?.isAdmin) return;
+        const reviewNote = note.value.trim();
+        if (reviewNote.length > 500 || (decision === 'reject' && !reviewNote)) {
+          $('adminMessage').textContent = '退回時請填寫原因，審核備註最多500字。'; return;
+        }
+        if (!confirm('確認' + (decision === 'approve' ? '核准加班' : '退回申請') + '？\n' +
+          r.name + '｜' + r.kind + '\n' + r.summary + '\n申請時數：' + minuteLabel(r.minutes) +
+          '\n備註：' + reviewNote)) return;
+        pendingMutation = {action: 'adminReviewOvertime', overtimeId: r.id, decision, note: reviewNote};
+        await sendOvertimeMutation();
+      });
+    });
+  });
+  $('adminMessage').textContent = '加班審核列表已更新。';
+}
+
+$('overtimeToggle').addEventListener('click', () => {
+  if (busy || pending || pendingMutation || !account?.enabled) return;
+  $('overtimePanel').hidden = !$('overtimePanel').hidden;
+  if (!$('overtimePanel').hidden && !$('overtimeRows').children.length) addOvertimeRow();
+});
+$('addOvertimeRow').addEventListener('click', addOvertimeRow);
+$('submitOvertime').addEventListener('click', beginOvertime);
+$('myOvertimes').addEventListener('click', () => overtimeTask(showMyOvertimes));
+$('reviewOvertimes').addEventListener('click', () => adminTask(showReviewOvertimes));
 
 async function start() {
   const timer = setTimeout(() => {
