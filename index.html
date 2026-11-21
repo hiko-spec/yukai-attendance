@@ -39,13 +39,14 @@
     overflow-wrap: anywhere;
   }
   .card p { margin: 6px 0; line-height: 1.6; }
-  .muted, .note { color: #65776e; font-size: 13px; line-height: 1.8; }
+  .muted, .note { color: #65776e; font-size: 14px; line-height: 1.8; }
   .note { text-align: center; margin-top: 24px; }
-  input, select {
+  input, select, textarea {
     width: 100%; padding: 12px; margin: 6px 0 14px;
     border: 1px solid #bacdc2; border-radius: 8px;
     font-size: 16px; background: white; color: #20342c;
   }
+  textarea { min-height: 100px; resize: vertical; font-family: inherit; }
   label { display: block; }
   hr { border: 0; border-top: 1px solid #dce6e1; margin: 24px 0; }
   [hidden] { display: none !important; }
@@ -69,6 +70,29 @@
   </div>
 
   <button id="retry" class="wide secondary" hidden>重試同一筆打卡</button>
+  <div id="correctionButtons" class="grid" hidden style="margin-top:14px">
+    <button id="correctionToggle" class="secondary">補打卡申請</button>
+    <button id="myCorrections" class="secondary">我的申請</button>
+  </div>
+  <section id="correctionPanel" hidden>
+    <hr><h2>補打卡申請</h2>
+    <p class="muted">時間以台灣時間填寫。申請送出後，須經管理員核准才會新增補登紀錄；補登不會取得或回填過去的位置。</p>
+    <label for="correctionTime">補打卡日期與時間（台灣時間）</label>
+    <input id="correctionTime" type="datetime-local" required>
+    <label for="correctionType">打卡類型</label>
+    <select id="correctionType">
+      <option>上班</option><option>下班</option><option>休息開始</option><option>休息結束</option>
+    </select>
+    <label for="correctionReason">申請原因（最多500字）</label>
+    <textarea id="correctionReason" maxlength="500" required placeholder="例如：忘記打下班卡，實際下班時間為……"></textarea>
+    <button id="submitCorrection" class="wide">送出補打卡申請</button>
+  </section>
+  <p id="correctionMessage" class="message" role="status"></p>
+  <button id="retryMutation" class="wide secondary" hidden>重試同一筆申請或審核</button>
+  <section id="myCorrectionPanel" hidden>
+    <hr><h2>我的補打卡申請</h2>
+    <div id="myCorrectionList"></div>
+  </section>
   <button id="adminToggle" class="wide secondary" hidden>管理後台</button>
 
   <section id="adminPanel" hidden>
@@ -81,6 +105,12 @@
       <button id="members" class="small secondary">員工管理</button>
     </div>
 
+    <button id="reviewCorrections" class="wide secondary">補打卡審核</button>
+    <section id="reviewSection" hidden>
+      <h3>補打卡審核</h3>
+      <p class="muted">核准會新增「補登」紀錄，原始紀錄保留。自己的申請須由另一位管理員審核。這裡不會計算加班或薪資。</p>
+      <div id="reviewList"></div>
+    </section>
     <div id="todayList"></div>
 
     <section id="employeeSection" hidden>
@@ -110,7 +140,7 @@
     打卡地點：忠孝東路五段477之5號<br>
     允許範圍：店舖周圍100公尺<br>
     只在打卡時取得位置，不持續追蹤。<br>
-    版本：定位打卡＋管理 1.2
+    版本：定位打卡＋管理＋補打卡 1.3
   </p>
 </main>
 
@@ -124,17 +154,22 @@ const $ = id => document.getElementById(id);
 let busy = false;
 let pending = null;
 let account = null;
+let pendingMutation = null;
 
 function refreshButtons() {
   document.querySelectorAll('button').forEach(b => {
-    b.disabled = busy || b.dataset.locked === 'true';
+    b.disabled = busy || (pendingMutation && b.id !== 'retryMutation') || b.dataset.locked === 'true';
   });
   $('punchButtons').querySelectorAll('button').forEach(b => {
-    b.disabled = busy || !!pending;
+    b.disabled = busy || !!pending || !!pendingMutation;
   });
-  $('adminToggle').disabled = busy || !!pending;
-  $('queryDate').disabled = busy;
-  $('queryEmployee').disabled = busy;
+  $('adminToggle').disabled = busy || !!pending || !!pendingMutation;
+  ['correctionToggle', 'myCorrections', 'submitCorrection'].forEach(id => {
+    $(id).disabled = busy || !!pending || !!pendingMutation;
+  });
+  document.querySelectorAll('input, select, textarea').forEach(field => {
+    field.disabled = busy || !!pendingMutation;
+  });
 }
 
 function setBusy(value) {
@@ -144,8 +179,9 @@ function setBusy(value) {
 
 function clearAdmin() {
   $('adminPanel').hidden = true;
+  $('reviewSection').hidden = true;
   $('adminToggle').hidden = true;
-  ['todayList', 'employeeList', 'recordList'].forEach(id => {
+  ['todayList', 'employeeList', 'recordList', 'reviewList'].forEach(id => {
     $(id).replaceChildren();
   });
   $('queryEmployee').replaceChildren(new Option('全部員工', ''));
@@ -185,6 +221,7 @@ async function api(payload) {
       $('check').hidden = false;
       account = null;
       clearAdmin();
+      clearCorrections();
     }
 
     return result;
@@ -197,9 +234,10 @@ async function api(payload) {
 }
 
 async function checkAccount() {
-  if (busy || pending) return;
+  if (busy || pending || pendingMutation) return;
   setBusy(true);
   clearAdmin();
+  clearCorrections();
   $('status').textContent = '正在確認帳號……';
 
   try {
@@ -213,6 +251,7 @@ async function checkAccount() {
     $('check').hidden = !!result.enabled;
     $('adminToggle').hidden = !(result.enabled && result.isAdmin);
 
+    $('correctionButtons').hidden = !(result.enabled && result.correctionEnabled);
     if (result.today) $('queryDate').value = result.today;
   } catch (error) {
     account = null;
@@ -247,7 +286,7 @@ function getLocation() {
 }
 
 async function beginPunch(type) {
-  if (busy || pending) return;
+  if (busy || pending || pendingMutation) return;
   if (!confirm('確認進行「' + type + '」定位打卡？')) return;
 
   setBusy(true);
@@ -325,7 +364,7 @@ function card(parent) {
 }
 
 async function adminTask(task) {
-  if (busy || pending || !account?.isAdmin) return;
+  if (busy || pending || pendingMutation || !account?.isAdmin) return;
   setBusy(true);
   $('adminMessage').textContent = '讀取中……';
 
@@ -417,6 +456,7 @@ async function showToday() {
       r ? (states[r.type] || r.type) + '｜' + r.time : '當天尚無打卡紀錄'
     );
     addText(box, 'p', '帳號：' + e.status, 'muted');
+    if (r?.source === '補登') addText(box, 'p', '來源：核准補登', 'muted');
   });
 
   $('adminMessage').textContent = '今日資料已更新。';
@@ -487,10 +527,13 @@ async function searchRecords() {
     addText(
       box, 'p',
       r.distance == null
-        ? '此筆沒有定位資料'
+        ? (r.source === '補登' ? '補登紀錄，無定位資料' : '此筆沒有定位資料')
         : '距離店舖約 ' + r.distance + ' 公尺',
       'muted'
     );
+    if (r.source === '補登') {
+      addText(box, 'p', '來源：補登（經管理員核准，不含歷史定位）', 'muted');
+    }
   });
 
   $('adminMessage').textContent = '查到 ' + records.length + ' 筆紀錄。';
@@ -507,7 +550,7 @@ $('login').addEventListener('click', () => {
 });
 
 $('adminToggle').addEventListener('click', () => {
-  if (busy || pending || !account?.isAdmin) return;
+  if (busy || pending || pendingMutation || !account?.isAdmin) return;
 
   $('adminPanel').hidden = !$('adminPanel').hidden;
   $('adminToggle').textContent =
@@ -519,6 +562,176 @@ $('adminToggle').addEventListener('click', () => {
 $('today').addEventListener('click', () => adminTask(showToday));
 $('members').addEventListener('click', () => adminTask(showEmployees));
 $('search').addEventListener('click', () => adminTask(searchRecords));
+
+
+// 補打卡送出與審核使用固定內容重試，避免網路逾時後重複申請。
+function clearCorrections() {
+  $('correctionButtons').hidden = true;
+  $('correctionPanel').hidden = true;
+  $('myCorrectionPanel').hidden = true;
+  $('myCorrectionList').replaceChildren();
+  $('correctionMessage').textContent = '';
+  $('correctionTime').value = '';
+  $('correctionReason').value = '';
+}
+
+function correctionCard(parent, r) {
+  const box = card(parent);
+  addText(box, 'strong', r.name + '｜' + r.type);
+  addText(box, 'p', '補打卡時間：' + r.punchTime);
+  addText(box, 'p', '原因：' + r.reason);
+  addText(box, 'p', '狀態：' + r.status);
+  addText(box, 'p', '申請時間：' + r.submittedAt, 'muted');
+  if (r.reviewerName) addText(box, 'p', '審核人：' + r.reviewerName, 'muted');
+  if (r.reviewedAt) addText(box, 'p', '審核時間：' + r.reviewedAt, 'muted');
+  if (r.reviewNote) addText(box, 'p', '審核備註：' + r.reviewNote, 'message');
+  return box;
+}
+
+async function showMyCorrections() {
+  const result = await api({ action: 'myCorrections' });
+  if (!result.ok) throw new Error(result.message);
+  if (!Array.isArray(result.corrections)) throw new Error('申請資料格式不正確。');
+  $('myCorrectionPanel').hidden = false;
+  $('myCorrectionList').replaceChildren();
+  if (!result.corrections.length) addText($('myCorrectionList'), 'p', '目前沒有補打卡申請。');
+  result.corrections.forEach(r => correctionCard($('myCorrectionList'), r));
+  if (result.truncated) addText($('myCorrectionList'), 'p', '僅顯示最近200筆；較舊紀錄仍保留於試算表。', 'muted');
+}
+
+async function correctionTask(task) {
+  if (busy || pending || pendingMutation || !account?.enabled) return;
+  setBusy(true);
+  $('correctionMessage').textContent = '讀取中……';
+  try {
+    await task();
+    $('correctionMessage').textContent = '申請資料已更新。';
+  } catch (error) {
+    $('correctionMessage').textContent = error.message;
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function beginCorrection() {
+  if (busy || pending || pendingMutation || !account?.enabled) return;
+  const punchTime = $('correctionTime').value;
+  const type = $('correctionType').value;
+  const reason = $('correctionReason').value.trim();
+  if (!punchTime || !reason || reason.length > 500) {
+    $('correctionMessage').textContent = '請填寫日期時間及500字以內的申請原因。';
+    return;
+  }
+  const time = new Date(punchTime + ':00+08:00').getTime();
+  if (!Number.isFinite(time) || time > Date.now()) {
+    $('correctionMessage').textContent = '請填寫已經發生的有效日期與時間。';
+    return;
+  }
+  if (!confirm('確認申請補打卡？\n' + punchTime.replace('T', ' ') + '（台灣時間）\n' + type + '\n原因：' + reason)) return;
+  pendingMutation = {action: 'submitCorrection', requestId: crypto.randomUUID(), punchTime, type, reason};
+  await sendCorrectionMutation();
+}
+
+async function sendCorrectionMutation() {
+  if (busy || !pendingMutation || !account?.enabled) return;
+  const payload = pendingMutation;
+  setBusy(true);
+  $('retryMutation').hidden = true;
+  $('correctionMessage').textContent = '正在送出，請稍候……';
+  let result;
+  try {
+    result = await api(payload);
+  } catch (error) {
+    $('correctionMessage').textContent = error.message +
+      '\n尚未確認是否完成。請留在此頁，按「重試同一筆申請或審核」，不要另外送出。';
+    $('retryMutation').hidden = false;
+    setBusy(false);
+    return;
+  }
+  pendingMutation = null;
+  const message = result.message || (result.ok ? '已完成。' : '處理失敗。');
+  $('correctionMessage').textContent = message;
+  if (payload.action === 'adminReviewCorrection') $('adminMessage').textContent = message;
+  if (result.ok && payload.action === 'submitCorrection') {
+    $('correctionReason').value = '';
+    $('correctionPanel').hidden = true;
+  }
+  try {
+    if (account?.enabled) {
+      if (payload.action === 'submitCorrection') await showMyCorrections();
+      else if (account.isAdmin) {
+        await showReviewCorrections();
+        $('todayList').replaceChildren();
+        $('recordList').replaceChildren();
+        $('adminMessage').textContent = message + '\n出勤及打卡紀錄請重新查詢。';
+      }
+    }
+  } catch (error) {
+    $('correctionMessage').textContent = message + '\n列表更新失敗：' + error.message + '，請稍後重新查詢。';
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function showReviewCorrections() {
+  const result = await api({ action: 'adminCorrections' });
+  if (!result.ok) throw new Error(result.message);
+  if (!Array.isArray(result.corrections)) throw new Error('審核資料格式不正確。');
+  $('reviewSection').hidden = false;
+  $('reviewList').replaceChildren();
+  const pendingCount = result.corrections.filter(r => ['待審核', '核准處理中'].includes(r.status)).length;
+  addText($('reviewList'), 'p', '本頁待處理：' + pendingCount + ' 筆');
+  if (!result.corrections.length) addText($('reviewList'), 'p', '目前沒有補打卡申請。');
+  if (result.truncated) addText($('reviewList'), 'p', '顯示最多200筆，待處理申請優先；較舊紀錄仍保留於試算表。', 'muted');
+  result.corrections.forEach(r => {
+    const box = correctionCard($('reviewList'), r);
+    if (!['待審核', '核准處理中'].includes(r.status)) return;
+    if (r.userId === account.userId) {
+      addText(box, 'p', '自己的申請須由另一位管理員審核。', 'muted');
+      return;
+    }
+    const label = addText(box, 'label', '審核備註（退回時必填）');
+    const note = document.createElement('textarea');
+    note.maxLength = 500;
+    note.value = r.reviewNote || '';
+    label.appendChild(note);
+    const inProgress = r.status === '核准處理中';
+    if (inProgress) {
+      note.readOnly = true;
+      addText(box, 'p', '上次核准未完成，請由原審核人按「繼續核准」，沿用原備註。', 'muted');
+    }
+    const grid = document.createElement('div');
+    grid.className = 'grid';
+    box.appendChild(grid);
+    ['approve', 'reject'].forEach(decision => {
+      if (inProgress && decision === 'reject') return;
+      const button = addText(grid, 'button', decision === 'approve' ? (inProgress ? '繼續核准' : '核准補登') : '退回申請');
+      if (decision === 'reject') button.className = 'danger';
+      button.addEventListener('click', async () => {
+        if (busy || pending || pendingMutation || !account?.isAdmin) return;
+        const reviewNote = note.value.trim();
+        if (reviewNote.length > 500 || (decision === 'reject' && !reviewNote)) {
+          $('adminMessage').textContent = '退回時請填寫原因，審核備註最多500字。';
+          return;
+        }
+        const text = decision === 'approve' ? '核准並新增補登紀錄' : '退回申請';
+        if (!confirm('確認' + text + '？\n' + r.name + '｜' + r.type + '\n' + r.punchTime + '\n備註：' + reviewNote)) return;
+        pendingMutation = {action: 'adminReviewCorrection', correctionId: r.id, decision, note: reviewNote};
+        await sendCorrectionMutation();
+      });
+    });
+  });
+  $('adminMessage').textContent = '補打卡審核列表已更新。';
+}
+
+$('correctionToggle').addEventListener('click', () => {
+  if (busy || pending || pendingMutation || !account?.enabled) return;
+  $('correctionPanel').hidden = !$('correctionPanel').hidden;
+});
+$('myCorrections').addEventListener('click', () => correctionTask(showMyCorrections));
+$('submitCorrection').addEventListener('click', beginCorrection);
+$('retryMutation').addEventListener('click', sendCorrectionMutation);
+$('reviewCorrections').addEventListener('click', () => adminTask(showReviewCorrections));
 
 async function start() {
   const timer = setTimeout(() => {
